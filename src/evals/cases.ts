@@ -1,39 +1,71 @@
-import type { AgentDecision, WorkspaceState } from "../types.js";
+import type { WorkspaceState } from "../types.js";
 import { DAY, FIXTURE_NOW, MINUTE, makeWorkspace } from "../state/fixtures.js";
+import { type EvalCase, singleTurn } from "./harness.js";
 
-export type ExpectedDecision = { frameId: string } | { kind: "ask_user" };
+export { matchesExpected } from "./harness.js";
+export type { EvalCase, ExpectedDecision } from "./harness.js";
 
-export interface EvalCase {
-  name: string;
-  userMessage: string;
-  state: WorkspaceState;
-  expected: ExpectedDecision;
+/** The M4 workspace: two recently viewed product specs and no active frame. */
+function twoRecentSpecs(): WorkspaceState {
+  return makeWorkspace({
+    activeFrameId: undefined,
+    recentFrameIds: ["doc_72", "doc_73"],
+    frames: makeWorkspace().frames.map((frame) =>
+      frame.id === "doc_73"
+        ? { ...frame, updatedAt: FIXTURE_NOW - DAY, lastViewedAt: FIXTURE_NOW - 4 * MINUTE }
+        : frame.id === "doc_72"
+          ? { ...frame, lastViewedAt: FIXTURE_NOW - 3 * MINUTE }
+          : frame,
+    ),
+  });
 }
 
-export function matchesExpected(decision: AgentDecision, expected: ExpectedDecision): boolean {
-  if ("frameId" in expected) {
-    return decision.kind === "select_frame" && decision.frameId === expected.frameId;
-  }
-  return decision.kind === "ask_user";
-}
+const easy: EvalCase[] = [
+  singleTurn("easy", "Explicit unique frame name", "Open Recruiting Notes.", makeWorkspace(), {
+    frameId: "doc_81",
+    action: "open",
+  }),
+  singleTurn(
+    "easy",
+    "Current active frame",
+    "Add a section about browser frames.",
+    makeWorkspace({ activeFrameId: "doc_72" }),
+    { frameId: "doc_72", action: "append" },
+  ),
+  singleTurn(
+    "easy",
+    "Deictic reference to the active frame",
+    "Rename this to Q4 Spec.",
+    makeWorkspace({ activeFrameId: "doc_72" }),
+    { frameId: "doc_72", action: "rename" },
+  ),
+  singleTurn(
+    "easy",
+    "Side pane reference",
+    "Summarize the page open in the side pane.",
+    makeWorkspace(),
+    { frameId: "browser_44", action: "read" },
+  ),
+  singleTurn("easy", "Title among similar titles", "Open the design spec.", makeWorkspace(), {
+    frameId: "doc_24",
+    action: "open",
+  }),
+  singleTurn("easy", "Frame named by type", "Open my calendar.", makeWorkspace(), {
+    frameId: "calendar_32",
+    action: "open",
+  }),
+];
 
-export const publicCases: EvalCase[] = [
-  {
-    name: "Current active frame",
-    userMessage: "Add a section about browser frames.",
-    state: makeWorkspace({ activeFrameId: "doc_72" }),
-    expected: { frameId: "doc_72" },
-  },
-  {
-    name: "Duplicate frame title",
-    userMessage: 'Add "email Sam" to my actions list.',
-    state: makeWorkspace(),
-    expected: { frameId: "todo_182" },
-  },
-  {
-    name: "Recent conversation reference",
-    userMessage: "Add Alex to that.",
-    state: makeWorkspace({
+const medium: EvalCase[] = [
+  singleTurn("medium", "Duplicate frame title", 'Add "email Sam" to my actions list.', makeWorkspace(), {
+    frameId: "todo_182",
+    action: "append",
+  }),
+  singleTurn(
+    "medium",
+    "Recent conversation reference",
+    "Add Alex to that.",
+    makeWorkspace({
       activeFrameId: "todo_182",
       conversation: [
         {
@@ -50,12 +82,13 @@ export const publicCases: EvalCase[] = [
         },
       ],
     }),
-    expected: { frameId: "doc_81" },
-  },
-  {
-    name: "Temporal conversation reference",
-    userMessage: "Go back to the spec we were using.",
-    state: makeWorkspace({
+    { frameId: "doc_81", action: "append" },
+  ),
+  singleTurn(
+    "medium",
+    "Temporal conversation reference",
+    "Go back to the spec we were using.",
+    makeWorkspace({
       activeFrameId: "todo_182",
       conversation: [
         {
@@ -78,28 +111,99 @@ export const publicCases: EvalCase[] = [
         },
       ],
     }),
-    expected: { frameId: "doc_72" },
-  },
-  {
-    name: "Explicit unique frame name",
-    userMessage: "Open Recruiting Notes.",
-    state: makeWorkspace(),
-    expected: { frameId: "doc_81" },
-  },
-  {
-    name: "Ambiguous destructive action",
-    userMessage: "Delete the product spec.",
-    state: makeWorkspace({
-      activeFrameId: undefined,
-      recentFrameIds: ["doc_72", "doc_73"],
-      frames: makeWorkspace().frames.map((frame) =>
-        frame.id === "doc_73"
-          ? { ...frame, updatedAt: FIXTURE_NOW - DAY, lastViewedAt: FIXTURE_NOW - 4 * MINUTE }
-          : frame.id === "doc_72"
-            ? { ...frame, lastViewedAt: FIXTURE_NOW - 3 * MINUTE }
-            : frame,
-      ),
-    }),
-    expected: { kind: "ask_user" },
-  },
+    { frameId: "doc_72", action: "open" },
+  ),
+  singleTurn("medium", "Ambiguous destructive action", "Delete the product spec.", twoRecentSpecs(), {
+    kind: "ask_user",
+  }),
+  singleTurn(
+    "medium",
+    "Archived duplicate",
+    "Add a pricing section to the launch plan.",
+    makeWorkspace(),
+    { frameId: "doc_40", action: "append" },
+  ),
+  singleTurn("medium", "Remembered alias", "Add Priya to the tracker.", makeWorkspace(), {
+    frameId: "sheet_70",
+    action: "append",
+  }),
+  singleTurn(
+    "medium",
+    "Person resolved by topic",
+    "Reply to Sam about the interview loop.",
+    makeWorkspace(),
+    { frameId: "mail_12", action: "reply" },
+  ),
+  singleTurn("medium", "Restore from trash", "Bring back the doc I deleted.", makeWorkspace(), {
+    frameId: "doc_90",
+    action: "restore",
+  }),
 ];
+
+const hard: EvalCase[] = [
+  singleTurn(
+    "hard",
+    "Destructive action with a literal-title rival",
+    "Delete the old actions list.",
+    makeWorkspace(),
+    { kind: "ask_user", candidates: ["todo_991", "todo_301"] },
+  ),
+  singleTurn("hard", "Unambiguous destructive action", "Trash the offer letter.", makeWorkspace(), {
+    frameId: "doc_60",
+    action: "delete",
+  }),
+  singleTurn(
+    "hard",
+    "Contrastive reference",
+    'Add "call the recruiter" to the other actions list.',
+    makeWorkspace(),
+    { frameId: "todo_991", action: "append" },
+  ),
+  singleTurn(
+    "hard",
+    "Project qualifier on a duplicate title",
+    'Put "renew passport" on my personal actions list.',
+    makeWorkspace(),
+    { frameId: "todo_991", action: "append" },
+  ),
+  singleTurn(
+    "hard",
+    "Calendar-linked frame",
+    "Open the notes for my next meeting.",
+    makeWorkspace(),
+    { frameId: "doc_95", action: "open" },
+  ),
+  singleTurn(
+    "hard",
+    "Bulk action with an exception",
+    "Close everything except the spec.",
+    makeWorkspace(),
+    { frameIds: ["todo_182", "browser_44"], action: "close" },
+  ),
+  singleTurn(
+    "hard",
+    "Create instead of select",
+    "Start a new doc for the Q4 launch retro.",
+    makeWorkspace(),
+    { kind: "create_frame", frameType: "document", projectId: "proj_launch" },
+  ),
+  singleTurn(
+    "hard",
+    "Selection as the source",
+    "Add this to my actions list.",
+    makeWorkspace({
+      activeFrameId: "doc_81",
+      selection: { frameId: "doc_81", text: "Schedule Alex's onsite" },
+    }),
+    { frameId: "todo_182", action: "append", sourceFrameId: "doc_81" },
+  ),
+  singleTurn(
+    "hard",
+    "External send to an ambiguous person",
+    "Email Sam.",
+    makeWorkspace({ activeFrameId: "doc_20", conversation: [], recentActions: [] }),
+    { kind: "ask_user", candidates: ["mail_12", "mail_27"] },
+  ),
+];
+
+export const publicCases: EvalCase[] = [...easy, ...medium, ...hard];
